@@ -1,0 +1,134 @@
+---
+title: "Jx2371-p8131-hw4"
+author: "Jingyu Xu"
+date: "3/4/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(formattable)
+library(nnet)
+```
+##Data manipulation
+
+```{r}
+data1 = tibble(
+  low_satisfaction = c(65, 34, 130, 141, 67, 130),
+  medium_satisfaction = c(54, 47, 76, 116, 48, 105),
+  high_satisfaction = c(100, 100, 111, 191, 62, 104),
+  type_of_housing = c('tower_block', 'tower_block', 'apartment', 'apartment', 'house', 'house'),
+  contact = rep(c('low', 'high'), 3)
+)
+
+data1$contact=factor(data1$contact, levels=c('low','high'))
+
+```
+
+##i)percentage table
+####1)corresponding to contact with other residents 
+```{r}
+##print the table corresponding to contact with others
+data_contact = data1%>%
+  group_by(contact)%>%
+  summarize(low=sum(low_satisfaction), medium=sum(medium_satisfaction), high = sum(high_satisfaction))%>%
+  mutate(total = low+medium+high)
+
+data_contact%>%
+  mutate(low = percent(low/total), medium = percent(medium/total), high = percent(high/total))%>%
+  knitr::kable(col.names = c("type of contact", "low satisfaction","medium satisfaction","high satisfaction","total" ))
+
+
+```
+
+From the table above, we can observe that the people who have high degree of contact with other residents also have higher proportion of high level satisfaction, compared with those who have low degree of contact. Meanwhile, among the two groups of poeple divided by the degree of contact with others, the largest proportions of them have high satisfaction, and the lowest proportions of them have medium satisfaction.
+
+####2)corresponding to types of housing
+
+```{r}
+##Print the table corresponding to type of housing
+data_type = data1%>%
+  group_by(type_of_housing)%>%
+  summarize(low=sum(low_satisfaction), medium=sum(medium_satisfaction), high = sum(high_satisfaction))%>%
+  mutate(total = low+medium+high)
+
+data_type%>%
+  mutate(low = percent(low/total), medium = percent(medium/total), high = percent(high/total))%>%
+  knitr::kable(col.names = c("type of housing", "low satisfaction","medium satisfaction","high satisfaction","total" ))
+```
+
+From the table above, we can observe that the people who live in tower block have largest proportions of high satisfaction, about 50%. And the people who live in house have the lowest proportions of high satisfaction. Meanwhile, we can see that among people who live in apartment, the largest proportions of them have high satisfaction. By contrast, among people who live in house, the largest proportions of them have medium satisfaction.
+
+##ii）nominal logistic regression model
+####analyze the association from the nominal model
+```{r}
+nominal_fit = multinom(cbind(low_satisfaction, medium_satisfaction, high_satisfaction)~contact+type_of_housing,data=data1)
+summary(nominal_fit)
+```
+
+Summary of the coefficients(interpretation):
+
+The log odds ratio of medium satisfaction versus low satisfaction between high and low level of contact with other residents is 0.2960. The log odds ratio of high satisfaction versus low satisfaction between high and low level of contact with other residents is 0.3282. Noticing the people of high contact have higher odds ratio, which indicates that they have higher level of satisfaction.
+
+The log odds ratio of medium satisfaction versus low satisfaction between people who live in house and apartment is 0.0697. The log odds ratio of medium satisfaction versus low satisfaction between people who live in tower block and apartment is 0.4068. The log odds ratio of high satisfaction versus low satisfaction between people who live in house and apartment is -0.3040. The log odds ratio of high satisfaction versus low satisfaction between people who live in tower block and apartment is -0.6416. This indicates that residents who live in tower blocks have the highest level of satisfaction.
+
+####Table of Coefficient interval
+
+```{r}
+##95%CI
+data_combine = data1%>%
+gather(key = 'satisfaction', value = 'proportion', low_satisfaction:high_satisfaction)
+
+multinom(satisfaction~contact+type_of_housing, weights = proportion,data=data_combine)%>% 
+broom::tidy()%>% 
+filter(term != '(Intercept)') %>% 
+mutate(CI_Low = estimate * exp(std.error * qnorm(0.025)),
+CI_High = estimate / exp(std.error * qnorm(0.025)))%>%
+select(y.level, term, CI_Low, CI_High)%>%
+knitr::kable()
+```
+
+The 95% coefficient interval is caculated in the table.
+
+####Check goodness of fit:
+
+```{r}
+pihat=predict(nominal_fit,type='probs') 
+m=rowSums(data1[,1:3])
+res.pearson=(data1[,1:3]-pihat*m)/sqrt(pihat*m) # pearson residuals 
+G.stat=sum(res.pearson^2) # Generalized Pearson Chisq Stat
+G.stat
+pval=1-pchisq(G.stat,df=(6-4)*(3-1))
+pval
+```
+
+The Pvalue is `r pval`, which is larger than 0.05, indicating the null hypothesis cannot be rejected. Thus, we can conclude that the fit is good.
+
+##iii)proportional odds model
+```{r}
+data_combine$satisfaction=factor(data_combine$satisfaction, levels=c('low_satisfaction','medium_satisfaction','high_satisfaction'))
+
+fit_polr = MASS::polr(satisfaction~contact+type_of_housing, weights = proportion,data=data_combine)
+
+summary(fit_polr)
+```
+
+Contact with others: The odds ratio between high and low levels of contact is 0.2524, so people with higher level of contact with other residents have higher level of satisfaction.
+
+Types of housing: The odds ratio between people living in house versus people living in apartment is -0.2353. The odds ratio between people living in tower block versus apartment is 0.5010. It indicates that people living in house have the lowest proportion of satisfaction and people living in  tower block have the highest proportion of satisfaction.
+
+##iv)Pearson residuals
+```{r}
+pihat=predict(fit_polr,data_combine,type='p')
+m=rowSums(data1[,1:3])
+res.pearson=(data1[,1:3]-pihat*m)/sqrt(pihat*m)
+residual_matrix = cbind(data1$type_of_housing,data1$contact,res.pearson)
+residual_matrix%>%knitr::kable()
+max_residual = residual_matrix[,3:5]%>%
+  abs()%>%
+  max()
+max_residual
+```
+
+From the results above, the largest pearson residuals belong to "high satisfaction"" and covariates of  high contact and tower block. It is 9.400.
